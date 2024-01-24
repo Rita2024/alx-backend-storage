@@ -1,38 +1,45 @@
 #!/usr/bin/env python3
 """A module with tools for request caching and tracking.
 """
-import redis
 import requests
+import time
 from functools import wraps
-from typing import Callable
 
+CACHE = {}
 
-redis_store = redis.Redis()
-"""The module-level Redis instance.
-"""
+def cache_decorator(expiration_time=10):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(url):
+            key = f"count:{url}"
 
+            if key in CACHE and time.time() - CACHE[key]['timestamp'] < expiration_time:
+                return CACHE[key]['content']
 
-def data_cacher(method: Callable) -> Callable:
-    """Caches the output of fetched data."""
+            result = func(url)
+            CACHE[key] = {'content': result, 'timestamp': time.time()}
+            return result
 
-    @wraps(method)
-    def invoker(url) -> str:
-        """The wrapper function for caching the output."""
-        redis_store.incr(f"count:{url}")
-        result = redis_store.get(f"result:{url}")
-        if result:
-            return result.decode("utf-8")
-        result = method(url)
-        redis_store.setex(f"result:{url}", 10, result)
-        return result
+        return wrapper
 
-    return invoker
+    return decorator
 
-
-@data_cacher
+@cache_decorator()
 def get_page(url: str) -> str:
-    """Returns the content of a URL after caching the request's response,
-    and tracking the request.
-    """
-    return requests.get(url).text
+    response = requests.get(url)
+    return response.text
 
+# Example usage:
+slow_url = "http://slowwly.robertomurray.co.uk/delay/5000/url/http://www.google.com"
+print(get_page(slow_url))  # This will be slow due to the simulated delay
+
+# Accessing the same URL again within 10 seconds should retrieve the cached result
+print(get_page(slow_url))
+
+# Accessing a different URL
+another_url = "http://www.example.com"
+print(get_page(another_url))
+
+# After 10 seconds, accessing the slow URL again will trigger a new request and update the cache
+time.sleep(10)
+print(get_page(slow_url))
